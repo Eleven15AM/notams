@@ -1,0 +1,7 @@
+z-*
+*.db
+__pycache__
+.env
+backups
+.env.github*
+Makefile.github

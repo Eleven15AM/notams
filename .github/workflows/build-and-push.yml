@@ -1,0 +1,109 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Allows manual trigger from GitHub
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set lowercase repository name
+      id: repo
+      run: |
+        # Convert repository name to lowercase for Docker tags
+        echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+    - name: Read version from .env.version
+      id: version
+      run: |
+        # Read VERSION from .env.version file
+        if [ -f .env.version ]; then
+          VERSION=$(grep -E '^VERSION=' .env.version | cut -d '=' -f2 | tr -d '[:space:]')
+          echo "Found version in .env.version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+        else
+          echo "ERROR: .env.version file not found!"
+          echo "Creating default .env.version with 'latest'"
+          echo "VERSION=latest" > .env.version
+          echo "version=latest" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push app image
+      run: |
+        # Use lowercase repository name and version from .env.version
+        REPO_NAME="${{ steps.repo.outputs.name }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        # Build app image with two tags: version and latest
+        IMAGE_NAME_APP="${{ env.REGISTRY }}/$REPO_NAME/notam-app"
+        
+        echo "Building app image: $IMAGE_NAME_APP:$VERSION"
+        echo "Also tagging as: $IMAGE_NAME_APP:latest"
+        
+        # Build the app image with both tags
+        docker build --target app \
+          -t "$IMAGE_NAME_APP:$VERSION" \
+          -t "$IMAGE_NAME_APP:latest" .
+        
+        # Push both tags
+        docker push "$IMAGE_NAME_APP:$VERSION"
+        docker push "$IMAGE_NAME_APP:latest"
+        
+        echo "App image pushed:"
+        echo "  - $IMAGE_NAME_APP:$VERSION"
+        echo "  - $IMAGE_NAME_APP:latest"
+
+    - name: Build and push test image
+      run: |
+        # Build test image with same version
+        REPO_NAME="${{ steps.repo.outputs.name }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        IMAGE_NAME_TEST="${{ env.REGISTRY }}/$REPO_NAME/notam-test"
+        
+        echo "Building test image: $IMAGE_NAME_TEST:$VERSION"
+        echo "Also tagging as: $IMAGE_NAME_TEST:latest"
+        
+        # Build the test image with both tags
+        docker build --target test \
+          -t "$IMAGE_NAME_TEST:$VERSION" \
+          -t "$IMAGE_NAME_TEST:latest" .
+        
+        # Push both tags
+        docker push "$IMAGE_NAME_TEST:$VERSION"
+        docker push "$IMAGE_NAME_TEST:latest"
+        
+        echo "Test image pushed:"
+        echo "  - $IMAGE_NAME_TEST:$VERSION"
+        echo "  - $IMAGE_NAME_TEST:latest"
+
+    - name: Output version info for .env file
+      run: |
+        REPO_NAME="${{ steps.repo.outputs.name }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        echo "Add this to your .env file for docker-compose:"
+        echo "VERSION=$VERSION"
+        echo ""
+        echo "Or use these specific image references:"
+        echo "NOTAM_APP_IMAGE=${{ env.REGISTRY }}/$REPO_NAME/notam-app:$VERSION"
+        echo "NOTAM_TEST_IMAGE=${{ env.REGISTRY }}/$REPO_NAME/notam-test:$VERSION"

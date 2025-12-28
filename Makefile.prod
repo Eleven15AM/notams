@@ -1,0 +1,227 @@
+# NOTAM System - Production Makefile
+# Commands for running with pre-built Docker images
+
+# Import colors and common settings from main Makefile
+ifndef BLUE
+BLUE := \033[0;34m
+GREEN := \033[0;32m
+YELLOW := \033[0;33m
+RED := \033[0;31m
+NC := \033[0m
+endif
+
+.DEFAULT_GOAL := help-prod
+
+# Load environment variables from .env if it exists
+ifneq (,$(wildcard .env))
+    include .env
+    export
+endif
+
+##@ Production Deployment
+
+check-docker-image: ## Debug: Show DOCKER_IMAGE value from .env
+	@echo "$(BLUE)Checking DOCKER_IMAGE configuration...$(NC)"
+	@if [ -z "$(DOCKER_IMAGE)" ]; then \
+		echo "$(RED) DOCKER_IMAGE not set in .env$(NC)"; \
+		echo "$(YELLOW)Please add: DOCKER_IMAGE=ghcr.io/username/notams:latest$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)DOCKER_IMAGE:$(NC) $(DOCKER_IMAGE)"
+	@echo "$(GREEN) DOCKER_IMAGE is configured$(NC)"
+
+pull-image: ## Pull latest image from GitHub Container Registry
+	@echo "$(BLUE)Pulling Docker image...$(NC)"
+	@if [ -z "$(DOCKER_IMAGE)" ]; then \
+		echo "$(RED) DOCKER_IMAGE not set in .env$(NC)"; \
+		echo "$(YELLOW)Please add to .env: DOCKER_IMAGE=ghcr.io/username/notams:latest$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Pulling from: $(DOCKER_IMAGE)$(NC)"
+	@docker pull "$(DOCKER_IMAGE)"
+	@echo "$(GREEN) Image pulled successfully$(NC)"
+
+run-background-prod: ## Start production service
+	@echo "$(BLUE)Starting production service...$(NC)"
+	@if [ -z "$(DOCKER_IMAGE)" ]; then \
+		echo "$(RED) DOCKER_IMAGE not set in .env$(NC)"; \
+		echo "$(YELLOW)Please add to .env: DOCKER_IMAGE=ghcr.io/username/notams:latest$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Using image: $(DOCKER_IMAGE)$(NC)"
+	@echo "$(BLUE)Pulling latest version...$(NC)"
+	@docker pull "$(DOCKER_IMAGE)"
+	@echo "$(BLUE)Stopping old container (if exists)...$(NC)"
+	@docker stop notam-app-prod 2>/dev/null || true
+	@docker rm notam-app-prod 2>/dev/null || true
+	@echo "$(BLUE)Creating data directory...$(NC)"
+	@mkdir -p $(CURDIR)/data
+	@echo "$(BLUE)Starting new container...$(NC)"
+	@docker run -d \
+		--name notam-app-prod \
+		--restart unless-stopped \
+		--env-file .env \
+		-v "$(CURDIR)/data:/app/data" \
+		-v "$(CURDIR)/queries:/app/queries" \
+		"$(DOCKER_IMAGE)"
+	@echo "$(GREEN) Production service started$(NC)"
+	@echo "$(YELLOW)View logs: make -f Makefile.prod logs-prod$(NC)"
+	@echo "$(YELLOW)Generate reports: make -f Makefile.prod reports-prod$(NC)"
+	@echo "$(YELLOW)Stop service: make -f Makefile.prod stop-prod$(NC)"
+
+stop-prod: ## Stop production service
+	@echo "$(BLUE)Stopping production service...$(NC)"
+	@docker stop notam-app-prod 2>/dev/null || true
+	@docker rm notam-app-prod 2>/dev/null || true
+	@echo "$(GREEN) Production service stopped$(NC)"
+
+restart-prod: stop-prod run-background-prod ## Restart production service with latest image
+
+logs-prod: ## Show production service logs
+	@echo "$(BLUE)Following production logs (Ctrl+C to exit)...$(NC)"
+	@docker logs -f notam-app-prod | less +G
+
+status-prod: ## Show production service status
+	@echo "$(BLUE)Production Service Status:$(NC)"
+	@if docker ps | grep -q notam-app-prod; then \
+		echo "$(GREEN) Service is running$(NC)"; \
+		docker ps | grep notam-app-prod; \
+	else \
+		echo "$(RED) Service is not running$(NC)"; \
+	fi
+	@echo ""
+	@if [ -f "$(CURDIR)/data/notam.db" ]; then \
+		echo "$(BLUE)Database:$(NC) $(GREEN)Found$(NC)"; \
+		ls -lh "$(CURDIR)/data/notam.db"; \
+	else \
+		echo "$(BLUE)Database:$(NC) $(YELLOW)Not found (run service first)$(NC)"; \
+	fi
+
+##@ Production Reports
+
+reports-prod: report-stats-prod report-drone-prod report-active-prod ## Run all reports on production data
+
+report-active-prod: ## Show active closures from production database
+	@echo "$(BLUE)Active Airport Closures (Production):$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		echo "$(YELLOW)Start it with: make -f Makefile.prod run-background-prod$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.reports active
+
+report-today-prod: ## Show today's closures from production database
+	@echo "$(BLUE)Today's Airport Closures (Production):$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.reports today
+
+report-drone-prod: ## Show drone closures from production database
+	@echo "$(BLUE)Drone-Related Closures (Production):$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.reports drone
+
+report-stats-prod: ## Show statistics from production database
+	@echo "$(BLUE)NOTAM Statistics (Production):$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.reports stats
+
+report-by-airport-prod: ## Show closures by airport from production database
+	@echo "$(BLUE)Closures by Airport (Production):$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.reports by-airport
+
+query-prod: ## Run custom query on production database
+	@if [ -z "$(FILE)" ]; then \
+		echo "$(RED) Please specify query file: make -f Makefile.prod query-prod FILE=queries/your_query.sql$(NC)"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(FILE)" ]; then \
+		echo "$(RED) Query file not found: $(FILE)$(NC)"; \
+		exit 1; \
+	fi
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Running query: $(FILE)$(NC)"
+	@docker exec notam-app-prod python -m src.reports query /app/queries/$(notdir $(FILE))
+
+##@ Production Database
+
+db-shell-prod: ## Open SQLite shell to production database
+	@echo "$(BLUE)Opening production database shell...$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec -it notam-app-prod sqlite3 /app/data/notam.db
+
+db-backup-prod: ## Backup production database
+	@echo "$(BLUE)Backing up production database...$(NC)"
+	@if [ ! -f "$(CURDIR)/data/notam.db" ]; then \
+		echo "$(RED) Database not found$(NC)"; \
+		exit 1; \
+	fi
+	@mkdir -p backups
+	@cp "$(CURDIR)/data/notam.db" "backups/notam_$(shell date +%Y%m%d_%H%M%S).db"
+	@echo "$(GREEN) Database backed up to backups/$(NC)"
+	@ls -lh backups/ | tail -1
+
+db-info-prod: ## Show production database information
+	@if [ ! -f "$(CURDIR)/data/notam.db" ]; then \
+		echo "$(RED) Database not found$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Database Information:$(NC)"
+	@ls -lh "$(CURDIR)/data/notam.db"
+	@echo ""
+	@if docker ps | grep -q notam-app-prod; then \
+		docker exec notam-app-prod sqlite3 /app/data/notam.db "SELECT COUNT(*) as 'Total Records' FROM airport_closures;"; \
+	else \
+		sqlite3 "$(CURDIR)/data/notam.db" "SELECT COUNT(*) as 'Total Records' FROM airport_closures;" 2>/dev/null || echo "$(YELLOW)Install sqlite3 to query database directly$(NC)"; \
+	fi
+
+##@ Production Utilities
+
+shell-prod: ## Open shell in production container
+	@echo "$(BLUE)Opening shell in production container...$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec -it notam-app-prod /bin/bash
+
+run-once-prod: ## Run single update cycle in production container
+	@echo "$(BLUE)Running single update in production container...$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.main --once
+
+help-prod: ## Show production commands help
+	@echo "$(BLUE)NOTAM System - Production Commands$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Basic Usage:$(NC)"
+	@echo "  make -f Makefile.prod <command>"
+	@echo ""
+	@echo "$(YELLOW)Quick Start:$(NC)"
+	@echo "  make -f Makefile.prod run-background-prod  # Start service"
+	@echo "  make -f Makefile.prod logs-prod            # View logs"
+	@echo "  make -f Makefile.prod reports-prod         # Generate reports"
+	@echo "  make -f Makefile.prod stop-prod            # Stop service"
+	@echo ""
+	@awk 'BEGIN {FS = ":.*##"; printf "\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2 } /^##@/ { printf "\n$(YELLOW)%s$(NC)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@echo ""

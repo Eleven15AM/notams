@@ -1,0 +1,50 @@
+services:
+  notam-app:
+    image: notam-app:${VERSION:-latest}
+    build:
+      context: .
+      target: app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_PATH=${DATABASE_PATH:-/app/data/notam.db}
+      - NOTAM_API_URL=${NOTAM_API_URL}
+      - NOTAM_API_KEY=${NOTAM_API_KEY:-}
+      - AIRPORTS=${AIRPORTS}
+      - UPDATE_INTERVAL_SECONDS=${UPDATE_INTERVAL_SECONDS:-3600}
+      - DRONE_KEYWORDS=${DRONE_KEYWORDS}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MIN_REQUEST_DELAY=${MIN_REQUEST_DELAY:-2}
+      - MAX_REQUEST_DELAY=${MAX_REQUEST_DELAY:-5}
+    volumes:
+      - ./data:/app/data
+      - ./queries:/app/queries
+    command: python -m src.main
+
+  notam-test:
+    image: notam-test:${VERSION:-latest}
+    build:
+      context: .
+      target: test
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./tests:/app/tests
+      - ./src:/app/src
+    command: pytest -v tests/
+
+  notam-query:
+    image: notam-query:${VERSION:-latest}
+    build:
+      context: .
+      target: app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_PATH=${DATABASE_PATH:-/app/data/notam.db}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data:/app/data
+      - ./queries:/app/queries
+    command: python -m src.reports
