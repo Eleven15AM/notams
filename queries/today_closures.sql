@@ -1,19 +1,21 @@
--- Query: Airport closures for today
+-- Query: NOTAMs active today
 SELECT 
     notam_id,
     airport_code,
     airport_name,
-    closure_start,
-    closure_end,
+    valid_from,
+    valid_to,
     CASE 
         WHEN is_drone_related = 1 THEN ' DRONE'
-        ELSE 'Normal'
+        WHEN is_closure = 1 THEN 'CLOSURE'
+        ELSE 'OTHER'
     END as type,
-    reason
-FROM airport_closures
-WHERE date(closure_start) = date('now')
+    body as reason
+FROM notams
+WHERE date(valid_from) = date('now')
    OR (
-       closure_start <= datetime('now')
-       AND (closure_end IS NULL OR closure_end >= datetime('now'))
+       valid_from <= datetime('now')
+       AND (valid_to IS NULL OR valid_to >= datetime('now'))
    )
-ORDER BY weight DESC, closure_start;
+   AND (notam_type != 'CANCEL' OR notam_type IS NULL)
+ORDER BY priority_score DESC, valid_from;

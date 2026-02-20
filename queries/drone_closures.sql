@@ -1,14 +1,15 @@
--- Query: All drone-related airport closures with details
+-- Query: All drone-related NOTAMs with details
 SELECT 
     notam_id,
     airport_code,
     airport_name,
     issue_date,
-    closure_start,
-    closure_end,
-    reason,
-    weight,
+    valid_from,
+    valid_to,
+    body as reason,
+    priority_score as score,
     created_at
-FROM airport_closures
+FROM notams
 WHERE is_drone_related = 1
-ORDER BY closure_start DESC;
+  AND (notam_type != 'CANCEL' OR notam_type IS NULL)
+ORDER BY valid_from DESC;

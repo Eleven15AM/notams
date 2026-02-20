@@ -11,15 +11,58 @@ services:
       - NOTAM_API_URL=${NOTAM_API_URL}
       - NOTAM_API_KEY=${NOTAM_API_KEY:-}
       - AIRPORTS=${AIRPORTS}
+      - SEARCH_TERMS=${SEARCH_TERMS}
       - UPDATE_INTERVAL_SECONDS=${UPDATE_INTERVAL_SECONDS:-3600}
       - DRONE_KEYWORDS=${DRONE_KEYWORDS}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MIN_REQUEST_DELAY=${MIN_REQUEST_DELAY:-2}
       - MAX_REQUEST_DELAY=${MAX_REQUEST_DELAY:-5}
+      - NTFY_URL=${NTFY_URL}
+      - NTFY_DIGEST_INTERVAL=${NTFY_DIGEST_INTERVAL:-3600}
+      - NTFY_MIN_SCORE=${NTFY_MIN_SCORE:-80}
+      - NTFY_MAX_DIGEST_ITEMS=${NTFY_MAX_DIGEST_ITEMS:-10}
+      - CLOSURE_SCORE=${CLOSURE_SCORE:-50}
+      - DRONE_SCORE=${DRONE_SCORE:-30}
+      - RESTRICTION_SCORE=${RESTRICTION_SCORE:-20}
+      - AIRPORTS_CSV_PATH=${AIRPORTS_CSV_PATH:-/app/data/airports.csv}
+      - PURGE_EXPIRED_AFTER_DAYS=${PURGE_EXPIRED_AFTER_DAYS:-30}
+      - PURGE_CANCELLED_AFTER_DAYS=${PURGE_CANCELLED_AFTER_DAYS:-7}
     volumes:
       - ./data:/app/data
       - ./queries:/app/queries
     command: python -m src.main
+
+  notam-app-search:
+    image: notam-app:${VERSION:-latest}
+    build:
+      context: .
+      target: app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_PATH=${DATABASE_PATH:-/app/data/notam.db}
+      - NOTAM_API_URL=${NOTAM_API_URL}
+      - NOTAM_API_KEY=${NOTAM_API_KEY:-}
+      - SEARCH_TERMS=${SEARCH_TERMS}
+      - UPDATE_INTERVAL_SECONDS=${UPDATE_INTERVAL_SECONDS:-3600}
+      - DRONE_KEYWORDS=${DRONE_KEYWORDS}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MIN_REQUEST_DELAY=${MIN_REQUEST_DELAY:-2}
+      - MAX_REQUEST_DELAY=${MAX_REQUEST_DELAY:-5}
+      - NTFY_URL=${NTFY_URL}
+      - NTFY_DIGEST_INTERVAL=${NTFY_DIGEST_INTERVAL:-3600}
+      - NTFY_MIN_SCORE=${NTFY_MIN_SCORE:-80}
+      - NTFY_MAX_DIGEST_ITEMS=${NTFY_MAX_DIGEST_ITEMS:-10}
+      - CLOSURE_SCORE=${CLOSURE_SCORE:-50}
+      - DRONE_SCORE=${DRONE_SCORE:-30}
+      - RESTRICTION_SCORE=${RESTRICTION_SCORE:-20}
+      - AIRPORTS_CSV_PATH=${AIRPORTS_CSV_PATH:-/app/data/airports.csv}
+      - PURGE_EXPIRED_AFTER_DAYS=${PURGE_EXPIRED_AFTER_DAYS:-30}
+      - PURGE_CANCELLED_AFTER_DAYS=${PURGE_CANCELLED_AFTER_DAYS:-7}
+    volumes:
+      - ./data:/app/data
+      - ./queries:/app/queries
+    command: python -m src.main --mode search
 
   notam-test:
     image: notam-test:${VERSION:-latest}

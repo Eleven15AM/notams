@@ -158,7 +158,71 @@ query-prod: ## Run custom query on production database
 	@echo "$(BLUE)Running query: $(FILE)$(NC)"
 	@docker exec notam-app-prod python -m src.reports query /app/queries/$(notdir $(FILE))
 
-##@ Production Database
+##@ Production Search
+
+search-prod: ## Run free-text search once in production container
+	@echo "$(BLUE)Running search in production container...$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.main --mode search --once
+
+search-background-prod: ## Run search in background in production container
+	@echo "$(BLUE)Starting background search in production container...$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec -d notam-app-prod python -m src.main --mode search
+
+##@ Production Aerodrome Data
+
+load-aerodromes-prod: ## Download and load OurAirports CSV in production
+	@echo "$(BLUE)Downloading and loading aerodromes in production container...$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.aerodrome_loader --download
+	@echo "$(GREEN) Aerodrome data loaded$(NC)"
+
+##@ Production Reports (New)
+
+report-search-prod: ## Show NOTAMs by search term from production
+	@echo "$(BLUE)NOTAMs by Search Term (Production):$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.reports search-term
+
+report-priority-prod: ## Show high priority NOTAMs from production
+	@echo "$(BLUE)High Priority NOTAMs (Production):$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.reports priority
+
+report-closures-prod: ## Show active closures from production
+	@echo "$(BLUE)Active Closures (Production):$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.reports closures
+
+##@ Production Database Maintenance
+
+purge-prod: ## Run database purge routines in production container
+	@echo "$(BLUE)Running database purge routines in production...$(NC)"
+	@if ! docker ps | grep -q notam-app-prod; then \
+		echo "$(RED) Production container not running$(NC)"; \
+		exit 1; \
+	fi
+	@docker exec notam-app-prod python -m src.database_cli --purge-all
+	@echo "$(GREEN) Purge complete$(NC)"
 
 db-shell-prod: ## Open SQLite shell to production database
 	@echo "$(BLUE)Opening production database shell...$(NC)"
@@ -188,9 +252,11 @@ db-info-prod: ## Show production database information
 	@ls -lh "$(CURDIR)/data/notam.db"
 	@echo ""
 	@if docker ps | grep -q notam-app-prod; then \
-		docker exec notam-app-prod sqlite3 /app/data/notam.db "SELECT COUNT(*) as 'Total Records' FROM airport_closures;"; \
+		docker exec notam-app-prod python -m src.reports stats; \
 	else \
-		sqlite3 "$(CURDIR)/data/notam.db" "SELECT COUNT(*) as 'Total Records' FROM airport_closures;" 2>/dev/null || echo "$(YELLOW)Install sqlite3 to query database directly$(NC)"; \
+		sqlite3 "$(CURDIR)/data/notam.db" \
+			"SELECT COUNT(*) || ' total NOTAMs' FROM notams; SELECT COUNT(*) || ' active closures' FROM notams WHERE is_closure=1 AND (valid_to IS NULL OR valid_to > datetime('now'));" \
+			2>/dev/null || echo "$(YELLOW)Install sqlite3 to query database directly$(NC)"; \
 	fi
 
 ##@ Production Utilities
@@ -211,6 +277,8 @@ run-once-prod: ## Run single update cycle in production container
 	fi
 	@docker exec notam-app-prod python -m src.main --once
 
+##@ Production Help
+
 help-prod: ## Show production commands help
 	@echo "$(BLUE)NOTAM System - Production Commands$(NC)"
 	@echo ""
@@ -222,6 +290,41 @@ help-prod: ## Show production commands help
 	@echo "  make -f Makefile.prod logs-prod            # View logs"
 	@echo "  make -f Makefile.prod reports-prod         # Generate reports"
 	@echo "  make -f Makefile.prod stop-prod            # Stop service"
+	@echo ""
+	@echo "$(YELLOW)Service Management:$(NC)"
+	@echo "  make -f Makefile.prod pull-image                # Pull latest image"
+	@echo "  make -f Makefile.prod run-background-prod       # Start service"
+	@echo "  make -f Makefile.prod stop-prod                  # Stop service"
+	@echo "  make -f Makefile.prod restart-prod               # Restart with latest image"
+	@echo "  make -f Makefile.prod logs-prod                  # Follow logs"
+	@echo "  make -f Makefile.prod status-prod                # Show service status"
+	@echo "  make -f Makefile.prod shell-prod                 # Open shell in container"
+	@echo "  make -f Makefile.prod run-once-prod              # Run single update"
+	@echo ""
+	@echo "$(YELLOW)Search Mode (New):$(NC)"
+	@echo "  make -f Makefile.prod search-prod            # Run free-text search once"
+	@echo "  make -f Makefile.prod search-background-prod # Run continuous search"
+	@echo "  make -f Makefile.prod load-aerodromes-prod   # Load aerodrome data"
+	@echo ""
+	@echo "$(YELLOW)Reports (New):$(NC)"
+	@echo "  make -f Makefile.prod reports-prod           # Run all reports"
+	@echo "  make -f Makefile.prod report-active-prod     # Show active NOTAMs"
+	@echo "  make -f Makefile.prod report-today-prod      # Show today's NOTAMs"
+	@echo "  make -f Makefile.prod report-drone-prod      # Show drone-related"
+	@echo "  make -f Makefile.prod report-stats-prod      # Show statistics"
+	@echo "  make -f Makefile.prod report-by-airport-prod # Group by airport"
+	@echo "  make -f Makefile.prod report-search-prod     # Show by search term"
+	@echo "  make -f Makefile.prod report-priority-prod   # Show high priority"
+	@echo "  make -f Makefile.prod report-closures-prod   # Show active closures"
+	@echo ""
+	@echo "$(YELLOW)Database Maintenance:$(NC)"
+	@echo "  make -f Makefile.prod purge-prod             # Run purge routines"
+	@echo "  make -f Makefile.prod db-shell-prod          # Open SQLite shell"
+	@echo "  make -f Makefile.prod db-backup-prod         # Backup database"
+	@echo "  make -f Makefile.prod db-info-prod           # Show database info"
+	@echo ""
+	@echo "$(YELLOW)Custom Queries:$(NC)"
+	@echo "  make -f Makefile.prod query-prod FILE=queries/query.sql  # Run custom SQL"
 	@echo ""
 	@awk 'BEGIN {FS = ":.*##"; printf "\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2 } /^##@/ { printf "\n$(YELLOW)%s$(NC)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 	@echo ""

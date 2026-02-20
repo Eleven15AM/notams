@@ -72,11 +72,13 @@ class ReportRunner:
     def run_predefined_report(self, report_name: str) -> None:
         """Run a predefined report."""
         reports = {
-            'active': self._report_active_closures,
-            'today': self._report_todays_closures,
-            'drone': self._report_drone_closures,
+            'active': self._report_active_notams,
+            'closures': self._report_closures,
+            'drone': self._report_drone_notams,
             'stats': self._report_statistics,
-            'by-airport': self._report_by_airport
+            'by-airport': self._report_by_airport,
+            'priority': self._report_priority,
+            'search-term': self._report_by_search_term
         }
         
         if report_name not in reports:
@@ -86,99 +88,173 @@ class ReportRunner:
         
         reports[report_name]()
     
-    def _report_active_closures(self) -> None:
-        """Display all active closures."""
-        print("\n=== Active Airport Closures ===\n")
-        results = self.db.get_active_closures()
+    def _report_active_notams(self) -> None:
+        """Display all active NOTAMs."""
+        print("\n=== Active NOTAMs (score >= 30) ===\n")
+        results = self.db.get_active_notams(min_score=30)
         
         if results:
-            # Simplify display - show most important fields
             display_results = []
             for r in results:
                 display_results.append({
-                    'NOTAM ID': r['notam_id'],
-                    'Airport': f"{r['airport_code']} ({r.get('airport_name', 'N/A')})",
-                    'Start': r['closure_start'][:16] if r['closure_start'] else 'N/A',
-                    'End': r['closure_end'][:16] if r['closure_end'] else 'PERM',
-                    'Drone': '  YES' if r['is_drone_related'] else 'No',
-                    'Weight': r['weight'],
-                    'Reason': r['reason'][:60]
+                    'ID': r['notam_id'][:12],
+                    'Airport': r['airport_code'] or r['location'] or 'N/A',
+                    'Score': r['priority_score'],
+                    'Type': r['notam_type'] or 'N',
+                    'Drone': '✓' if r['is_drone_related'] else '',
+                    'Closure': '✓' if r['is_closure'] else '',
+                    'Valid To': r['valid_to'][:10] if r['valid_to'] else 'PERM',
+                })
+            self._display_results(display_results)
+        else:
+            print("No active NOTAMs found.\n")
+    
+    def _report_closures(self) -> None:
+        """Display closure NOTAMs."""
+        print("\n=== Active Closures ===\n")
+        results = self.db.get_closures(active_only=True)
+        
+        if results:
+            display_results = []
+            for r in results:
+                display_results.append({
+                    'ID': r['notam_id'][:12],
+                    'Airport': r['airport_code'] or r['location'] or 'N/A',
+                    'Score': r['priority_score'],
+                    'Drone': '✓' if r['is_drone_related'] else '',
+                    'Reason': r['body'][:60] if r['body'] else 'N/A',
                 })
             self._display_results(display_results)
         else:
             print("No active closures found.\n")
     
-    def _report_todays_closures(self) -> None:
-        """Display closures for today."""
-        print(f"\n=== Today's Airport Closures ({datetime.now().strftime('%Y-%m-%d')}) ===\n")
-        results = self.db.get_todays_closures()
+    def _report_drone_notams(self) -> None:
+        """Display drone-related NOTAMs."""
+        print("\n=== Drone-Related NOTAMs ===\n")
+        results = self.db.get_drone_notams(active_only=True)
         
         if results:
             display_results = []
             for r in results:
                 display_results.append({
-                    'NOTAM ID': r['notam_id'],
-                    'Airport': f"{r['airport_code']} ({r.get('airport_name', 'N/A')})",
-                    'Start': r['closure_start'][:16] if r['closure_start'] else 'N/A',
-                    'End': r['closure_end'][:16] if r['closure_end'] else 'PERM',
-                    'Drone': '  YES' if r['is_drone_related'] else 'No',
-                    'Reason': r['reason'][:60]
+                    'ID': r['notam_id'][:12],
+                    'Airport': r['airport_code'] or r['location'] or 'N/A',
+                    'Score': r['priority_score'],
+                    'Search Term': r['search_term'] or 'N/A',
+                    'Body': r['body'][:60] if r['body'] else 'N/A',
                 })
             self._display_results(display_results)
         else:
-            print("No closures for today.\n")
+            print("No drone-related NOTAMs found.\n")
     
-    def _report_drone_closures(self) -> None:
-        """Display drone-related closures."""
-        print("\n=== Drone-Related Closures ===\n")
-        results = self.db.get_drone_closures()
+    def _report_priority(self) -> None:
+        """Display high priority NOTAMs."""
+        print("\n=== High Priority NOTAMs (score >= 50) ===\n")
+        results = self.db.get_active_notams(min_score=50)
         
         if results:
             display_results = []
             for r in results:
                 display_results.append({
-                    'NOTAM ID': r['notam_id'],
-                    'Airport': f"{r['airport_code']} ({r.get('airport_name', 'N/A')})",
-                    'Issued': r['issue_date'][:10] if r['issue_date'] else 'N/A',
-                    'Start': r['closure_start'][:16] if r['closure_start'] else 'N/A',
-                    'End': r['closure_end'][:16] if r['closure_end'] else 'PERM',
-                    'Reason': r['reason'][:60]
+                    'ID': r['notam_id'],
+                    'Airport': r['airport_code'] or r['location'] or 'N/A',
+                    'Score': r['priority_score'],
+                    'Type': r['notam_type'] or 'N',
+                    'Closure': '✓' if r['is_closure'] else '',
+                    'Drone': '✓' if r['is_drone_related'] else '',
                 })
             self._display_results(display_results)
         else:
-            print("No drone-related closures found.\n")
+            print("No high priority NOTAMs found.\n")
+    
+    def _report_by_search_term(self) -> None:
+        """Prompt for search term and display results."""
+        print("\n=== NOTAMs by Search Term ===\n")
+        
+        # Get unique search terms from DB
+        query = "SELECT DISTINCT search_term FROM notams WHERE search_term IS NOT NULL ORDER BY search_term"
+        terms = self.db.execute_custom_query(query)
+        
+        if not terms:
+            print("No search terms found in database.")
+            return
+        
+        print("Available search terms:")
+        for i, row in enumerate(terms, 1):
+            print(f"  {i}. {row['search_term']}")
+        
+        try:
+            choice = input("\nEnter number or search term: ").strip()
+            if choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(terms):
+                    term = terms[idx]['search_term']
+                else:
+                    print("Invalid choice")
+                    return
+            else:
+                term = choice
+            
+            results = self.db.get_by_search_term(term)
+            
+            if results:
+                display_results = []
+                for r in results:
+                    display_results.append({
+                        'ID': r['notam_id'],
+                        'Airport': r['airport_code'] or r['location'] or 'N/A',
+                        'Score': r['priority_score'],
+                        'Active': '✓' if (r['valid_to'] is None or r['valid_to'] > datetime.now().isoformat()) else '',
+                        'Body': r['body'][:60] if r['body'] else 'N/A',
+                    })
+                self._display_results(display_results)
+            else:
+                print(f"No NOTAMs found for term: {term}\n")
+                
+        except KeyboardInterrupt:
+            print("\nCancelled")
+            sys.exit(0)
     
     def _report_statistics(self) -> None:
         """Display summary statistics."""
         print("\n=== NOTAM Statistics ===\n")
         stats = self.db.get_statistics()
         
-        print(f"Total closures in database: {stats['total_closures']}")
+        print(f"Total NOTAMs in database: {stats['total_notams']}")
+        print(f"Active NOTAMs: {stats['active_notams']}")
+        print(f"Closures (all time): {stats['closures']}")
         print(f"Active closures: {stats['active_closures']}")
-        print(f"Today's closures: {stats['todays_closures']}")
-        print(f"Drone-related (all time): {stats['drone_closures']}")
-        print(f"Drone-related (active): {stats['active_drone_closures']}")
+        print(f"Drone-related (all time): {stats['drone_notams']}")
+        print(f"Active drone-related: {stats['active_drone_notams']}")
+        print(f"High priority (score >= 80): {stats['high_priority']}")
         
-        if stats['total_closures'] > 0:
-            drone_pct = (stats['drone_closures'] / stats['total_closures']) * 100
-            print(f"Drone closure percentage: {drone_pct:.1f}%")
+        if stats['total_notams'] > 0:
+            drone_pct = (stats['drone_notams'] / stats['total_notams']) * 100
+            closure_pct = (stats['closures'] / stats['total_notams']) * 100
+            print(f"\nDrone NOTAM percentage: {drone_pct:.1f}%")
+            print(f"Closure percentage: {closure_pct:.1f}%")
         
         print()
     
     def _report_by_airport(self) -> None:
-        """Display closures grouped by airport."""
-        print("\n=== Closures by Airport ===\n")
+        """Display NOTAMs grouped by airport."""
+        print("\n=== NOTAMs by Airport ===\n")
         
         query = """
         SELECT 
             airport_code,
             MAX(airport_name) as airport_name,
-            COUNT(*) as total_closures,
-            SUM(CASE WHEN is_drone_related = 1 THEN 1 ELSE 0 END) as drone_closures,
-            SUM(CASE WHEN closure_end IS NULL OR closure_end > datetime('now') THEN 1 ELSE 0 END) as active_closures
-        FROM airport_closures
+            COUNT(*) as total_notams,
+            SUM(CASE WHEN is_drone_related = 1 THEN 1 ELSE 0 END) as drone_notams,
+            SUM(CASE WHEN is_closure = 1 THEN 1 ELSE 0 END) as closures,
+            SUM(CASE WHEN (valid_to IS NULL OR valid_to > datetime('now')) 
+                      AND (notam_type != 'CANCEL' OR notam_type IS NULL)
+                 THEN 1 ELSE 0 END) as active_notams
+        FROM notams
+        WHERE airport_code IS NOT NULL
         GROUP BY airport_code
-        ORDER BY total_closures DESC
+        ORDER BY total_notams DESC
+        LIMIT 50
         """
         
         results = self.db.execute_custom_query(query)
@@ -194,11 +270,13 @@ def main():
         print("  python -m src.reports <report_name>")
         print("  python -m src.reports query <query_file>")
         print("\nAvailable reports:")
-        print("  active       - Show all active closures")
-        print("  today        - Show today's closures")
-        print("  drone        - Show drone-related closures")
+        print("  active       - Show active NOTAMs (score >= 30)")
+        print("  closures     - Show active closures")
+        print("  drone        - Show drone-related NOTAMs")
         print("  stats        - Show summary statistics")
-        print("  by-airport   - Show closures grouped by airport")
+        print("  by-airport   - Show NOTAMs grouped by airport")
+        print("  priority     - Show high priority NOTAMs (score >= 50)")
+        print("  search-term  - Show NOTAMs by search term")
         sys.exit(1)
     
     command = sys.argv[1]

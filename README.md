@@ -1,78 +1,286 @@
 # NOTAMS: Notice to Airmen (NOTAMs) Monitoring System
 
-A Docker-based Python application for querying, storing, and reporting on Notice to Airmen (NOTAM) notifications for worldwide airports, with emphasis on drone-related closures. Is it adversaries, is it UAPs, is it morons with a joystick? Who knows!
+A Docker-based Python application for querying, storing, and reporting on Notice to Airmen (NOTAM) notifications for worldwide airports, with emphasis on drone/UAP-related activity. Is it adversaries, is it UAPs, is it morons with a joystick? Who knows!
 
 ## Description
-I built this app to process NOTAMs notices and hunt for keywords like 'drones' and 'balloons' (read UAPs) in airspace closures - yes, this is an attempt at getting information about UFOs/UAPs, get over it.
 
-NOTAMS works by storing closure info in a local SQLite database, which you can then query with canned reports or your own custom searches. 
+I built this app to process NOTAM notices and hunt for keywords like 'drones' and 'balloons' (read UAPs) in airspace closures - yes, this is an attempt at getting information about UFOs/UAPs, get over it.
+
+**Version 2.0 Features:**
+- **Rich NOTAM Domain Model** - Full ICAO-compliant parsing with Q-code decoding
+- **Dual Monitoring Modes**:
+  - `airport` mode - Traditional airport-specific monitoring
+  - `search` mode - Free-text search across all NOTAMs
+- **Priority Scoring** - Automatic scoring of NOTAM importance (0-100+)
+- **Digest Alerts** - Batched notifications via ntfy.sh to respect rate limits
+- **Aerodrome Database** - Cached airport data from OurAirports
+- **Comprehensive Reporting** - Multiple report types for analysis
+
+NOTAMS works by storing NOTAM data in a local SQLite database, which you can then query with canned reports or your own custom searches. The application intelligently parses ICAO-standard NOTAM format, extracts Q-codes, and calculates priority scores based on configurable rules.
 
 I've wrapped it all in Docker for easier deployment, and most tasks are run through the Makefile for convenience. Easy is a relative term, some level of knowledge of Docker, Python and Linux systems (or Windows WSL) is required. I will try to be as clear as possible in the documentation, however.
 
-The input data endpoint is a bit of a hack: it pulls data from the FAA's public site since I couldn't find a proper API that didn't cost a fortune. 
-
-The code uses OOP principles, so swapping in a better data source later should be straightforward. And yes, the application plays nice by rate limiting itself to avoid spamming the site.
+The input data endpoint is a bit of a hack: it pulls data from the FAA's public site since I couldn't find a proper API that didn't cost a fortune. The code uses OOP principles, so swapping in a better data source later should be straightforward. And yes, the application plays nice by rate limiting itself to avoid spamming the site.
 
 ## Requirements
+
 - Docker
 - Docker Compose
 - Make
 
 ## Project Structure
 
-The application relies heavely on Makefiles for its running. It is more efficient and promotes standardisation, I believe. The project deploys a Github Package that can be pulled when running in "Production" mode. You can however build the project locally.
-
-```
-notams/
-├── Dockerfile              # Multi-stage Docker build
-├── docker-compose.yml      # Service definitions
-├── .env                    # Environment configuration (example)
-├── .env                    # Environment configuration (needs to be copied from .env.exampleruntime)
-├── requirements.txt        # Python dependencies
-├── requirements-test.txt   # Test dependencies
-├── Makefile               # Command shortcuts for local build and run
-├── Makefile.prod          # Command shortcuts for "Production" run
-├── run_query.sh           # Helper script for running queries
-├── src/
-│   ├── main.py            # Main application entry point
-│   ├── config.py          # Configuration management
-│   ├── notam_client.py    # NOTAM API client
-│   ├── database.py        # Database operations
-│   ├── parser.py          # NOTAM parsing logic
-│   └── reports.py         # Report generation
-├── tests/
-│   ├── test_parser.py     # Parser unit tests
-│   ├── test_database.py   # Database unit tests
-│   └── test_integration.py # Integration tests
-├── queries/
-│   ├── drone_closures.sql  # Drone-related closures
-│   ├── recent_closures.sql # Recent closures
-│   └── todays_closures.sql # Today's closures
-└── data/
-    └── notam.db           # SQLite database (created on first run)
-```
-
-## Quick Start (pull the Github package)
-
-You only need these things:
-
-- `Makefile`
-- `Makefile.prod`
-- `.env` (copy from .env.example)
-
 ```bash
-# 1. Clone project, if you are forking change the username to the appropriate value
-git clone https://github.com/[USERNAME]/notams
+notams/
+├── Dockerfile                    # Multi-stage Docker build
+├── docker-compose.yml            # Service definitions
+├── .env                          # Environment configuration (copy from .env.example)
+├── .env.version                  # Version configuration
+├── .env.example                  # Example configuration with all options
+├── requirements.txt              # Python dependencies
+├── requirements-test.txt         # Test dependencies
+├── Makefile                      # Local development commands
+├── Makefile.prod                 # Production deployment commands
+├── run_query.sh                  # Helper script for running queries
+├── src/
+│   ├── __init__.py
+│   ├── main.py                    # Main application entry point
+│   ├── config.py                  # Configuration management
+│   ├── notam_client.py            # NOTAM API clients (airport + search)
+│   ├── database.py                # Database operations
+│   ├── parser.py                  # NOTAM parsing (returns Notam objects)
+│   ├── reports.py                 # Report generation
+│   ├── alert_digester.py          # NEW - Batched ntfy notifications
+│   ├── aerodrome_repository.py    # Airport data caching
+│   ├── aerodrome_loader.py        # CLI for loading airport data
+│   ├── database_cli.py            # Database maintenance CLI
+│   └── models/
+│       ├── __init__.py
+│       └── notam.py               # Rich NOTAM domain model
+├── tests/
+│   ├── test_notam_model.py        # Notam model tests
+│   ├── test_parser.py             # Parser tests
+│   ├── test_database.py           # Database tests
+│   └── test_integration.py        # Integration tests
+├── queries/
+│   ├── drone_closures.sql         # Drone-related NOTAMs
+│   ├── recent_closures.sql        # Recent NOTAMs
+│   └── todays_closures.sql        # Today's NOTAMs
+└── data/
+    ├── notam.db                   # SQLite database (created on first run)
+    └── airports.csv                # Optional - OurAirports dataset
 
-# 2. navigate in
+```
+
+## Quick Start
+
+### 1. Clone and Initialize
+
+``` {bash}
+# Clone the repository
+git clone https://github.com/[USERNAME]/notams
 cd notams
 
-# 3. Create .env from example
-cp .env.example .env
+# Initialize project (creates directories and .env file)
+make init
 
-# 4. edit .env
+# Edit configuration
 nano .env
 
-# 5. run
-make run-background-prod
-```   
+```
+
+### 2. Configure .env
+Key configuration options (see .env.example for all options):
+
+``` {bash}
+
+# Software version
+VERSION=v2.0.0
+
+# Choose your monitoring mode:
+# Option A: Airport monitoring
+AIRPORTS=KATL,KORD,KLAX,EGLL,LFPG,EDDF
+
+# Option B: Free-text search
+SEARCH_TERMS=drone,UAS,UAV,RPAS,balloon,UAP
+
+# Digest alerts (batched notifications)
+NTFY_URL=https://ntfy.sh/your-topic
+NTFY_DIGEST_INTERVAL=3600  # Send digest every hour
+NTFY_MIN_SCORE=80          # Only include NOTAMs with score >= 80
+NTFY_MAX_DIGEST_ITEMS=10   # Max items to show in digest
+
+# Database
+DATABASE_PATH=/app/data/notam.db
+
+```
+
+### 3. Run the Application
+
+Airport Mode:
+
+``` {bash}
+
+# Run once
+make run-once
+
+# Continuous monitoring
+make run-background
+make logs-follow
+
+```
+
+Search Mode:
+
+``` {bash}
+
+# Run once
+make search
+
+# Continuous search
+make search-background
+
+```
+
+### 4. Load Aerodrome Data (Optional but Recommended)
+
+``` {bash}
+
+# Download and load OurAirports CSV
+make load-aerodromes
+
+```
+
+### 5. View Reports
+
+``` {bash}
+
+# All reports
+make reports
+
+# Specific reports
+make report-stats        # Database statistics
+make report-active       # Active NOTAMs
+make report-closures     # Active closures
+make report-drone        # Drone-related NOTAMs
+make report-priority     # High priority NOTAMs (score >= 50)
+make report-search       # NOTAMs by search term
+
+```
+
+## Priority Scoring System
+
+NOTAMs are automatically scored based on their importance:
+
+|Condition|Points|
+|---|---|
+|Closure|+50|
+|Drone-related|+30|
+|Restriction (non-closure)|+20|
+|NEW NOTAM|+10|
+|REPLACE NOTAM|+5|
+|Aerodrome scope|+10|
+|Permanent|+5|
+|Trigger NOTAM|-10|
+
+Score thresholds:
+
+- 80+: Critical - Urgent alerts
+- 60-79: High priority
+- 40-59: Medium priority
+- <40: Routine
+
+## Alerts with ntfy
+
+When NTFY_URL is configured, the system batches alerts into periodic digests.
+
+``` {bash}
+
+NOTAM Digest: 12 new high-priority items
+
+📊 Summary
+• Total: 12
+• Closures: 8
+• Drone-related: 3
+• Restrictions: 4
+• Airports affected: 5
+
+⏰ Period: 2026-02-20 10:30 UTC
+
+🔔 Top Items
+
+1. A0521/26 - LPSO (Score: 100) [CLOSURE, DRONE]
+   RUNWAY 09/27 CLSD DUE TO DRONE ACTIVITY...
+
+2. A0522/26 - LPSO (Score: 100) [CLOSURE, DRONE]
+   AD CLSD DUE TO UAS SIGHTING...
+
+... and 2 more
+
+[View in NOTAM system](https://ntfy.sh/your-topic)
+```
+
+## Database Maintenance
+
+``` {bash}
+# Purge old records (using configured values)
+make purge
+
+# Open SQLite shell
+make db-shell
+
+# Backup production database
+make -f Makefile.prod db-backup-prod
+
+```
+
+## Production Deployment
+
+``` bash
+# Pull latest image and start service
+make -f Makefile.prod run-background-prod
+
+# View logs
+make -f Makefile.prod logs-prod
+
+# Generate reports
+make -f Makefile.prod reports-prod
+
+# Stop service
+make -f Makefile.prod stop-prod
+
+```
+
+## Running Tests
+
+``` bash
+# All tests
+make test
+
+# Unit tests only
+make test-unit
+
+# With coverage
+make test-coverage
+
+```
+
+## Custom SQL Queries
+
+Create your own queries in the queries/ directory:
+
+``` bash
+# in queries/high_priority.sql
+SELECT 
+    notam_id,
+    airport_code,
+    priority_score,
+    is_closure,
+    is_drone_related,
+    substr(body, 1, 100) as preview
+FROM notams
+WHERE priority_score >= 80
+ORDER BY priority_score DESC;
+# Run it:
+make query FILE=queries/high_priority.sql
+```

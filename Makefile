@@ -6,6 +6,9 @@
         report-active report-drone report-stats report-by-airport report-today \
         query query-drone query-recent check-env rebuild clean-cache
 
+.PHONY: help init build run-once run-background logs stop test test-unit test-coverage reports \
+        search search-background load-aerodromes purge db-shell report-search report-priority
+
 .DEFAULT_GOAL := help
 
 # Color output
@@ -37,6 +40,19 @@ help: ## Display this help message
 	@echo "  make -f Makefile.prod run-background-prod   # Start service"
 	@echo "  make -f Makefile.prod reports-prod          # Generate reports"
 	@echo "  make -f Makefile.prod logs-prod             # View logs"
+	@echo ""
+	@echo "$(YELLOW)Search Modes (New):$(NC)"
+	@echo "  make search              # Run free-text search once"
+	@echo "  make search-background   # Run continuous free-text search"
+	@echo "  make report-search       # Show NOTAMs by search term"
+	@echo "  make report-priority     # Show high priority NOTAMs"
+	@echo ""
+	@echo "$(YELLOW)Aerodrome Data:$(NC)"
+	@echo "  make load-aerodromes     # Download and load OurAirports CSV"
+	@echo ""
+	@echo "$(YELLOW)Database Maintenance:$(NC)"
+	@echo "  make purge               # Run database purge routines"
+	@echo "  make db-shell            # Open SQLite shell"
 	@echo ""
 	@awk 'BEGIN {FS = ":.*##"; printf "\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2 } /^##@/ { printf "\n$(YELLOW)%s$(NC)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 	@echo ""
@@ -151,13 +167,13 @@ report-today: ## Show today's airport closures
 	@echo "$(BLUE)Today's Airport Closures:$(NC)"
 	@docker-compose run --rm notam-query python -m src.reports today
 
-report-drone: ## Show drone-related closures
-	@echo "$(BLUE)Drone-Related Closures:$(NC)"
-	@docker-compose run --rm notam-query python -m src.reports drone
+# report-drone: ## Show drone-related closures
+# 	@echo "$(BLUE)Drone-Related Closures:$(NC)"
+# 	@docker-compose run --rm notam-query python -m src.reports drone
 
-report-stats: ## Show summary statistics
-	@echo "$(BLUE)NOTAM Statistics:$(NC)"
-	@docker-compose run --rm notam-query python -m src.reports stats
+# report-stats: ## Show summary statistics
+# 	@echo "$(BLUE)NOTAM Statistics:$(NC)"
+# 	@docker-compose run --rm notam-query python -m src.reports stats
 
 report-by-airport: ## Show closures grouped by airport
 	@echo "$(BLUE)Closures by Airport:$(NC)"
@@ -179,60 +195,72 @@ query: ## Run custom SQL query (usage: make query FILE=queries/your_query.sql)
 	@echo "$(BLUE)Running query: $(FILE)$(NC)"
 	@docker-compose run --rm notam-query python -m src.reports query $(FILE)
 
-query-drone: ## Run predefined drone closures query
-	@$(MAKE) query FILE=queries/drone_closures.sql
+query-drone: ## Run drone closures query
+	@make query FILE=queries/drone_closures.sql
 
-query-recent: ## Run predefined recent closures query
-	@$(MAKE) query FILE=queries/recent_closures.sql
+query-recent: ## Run recent closures query
+	@make query FILE=queries/recent_closures.sql
 
-##@ Development
+##@ Logs
 
-logs: ## Show application logs (last 100 lines)
-	@docker-compose logs --tail=100 notam-app | less +G
+logs: ## Show recent logs
+	@docker-compose logs --tail=50 notam-app
 
-logs-follow: ## Follow application logs in real-time
-	@echo "$(BLUE)Following application logs...$(NC)"
-	@echo "$(YELLOW)Press Ctrl+C to stop$(NC)"
-	@docker-compose logs -f --timestamps notam-app | less +G
+logs-follow: ## Follow logs in real-time
+	@docker-compose logs -f notam-app
 
-status: ## Show development containers status
-	@echo "$(BLUE)Container Status:$(NC)"
-	@docker-compose ps
-	@echo ""
-	@if [ -f data/notam.db ]; then \
-		echo "$(GREEN) Database exists$(NC)"; \
-		$(MAKE) report-stats 2>/dev/null || true; \
-	else \
-		echo "$(YELLOW) Database not found. Run 'make run-once' to initialize$(NC)"; \
-	fi
+##@ Free-Text Search
 
-info: ## Show project information
-	@echo "$(BLUE)NOTAM Monitoring System$(NC)"
-	@echo "======================="
-	@echo ""
-	@echo "Docker Images:"
-	@docker images | grep notam || echo "  No images built yet"
-	@echo ""
-	@echo "Containers:"
-	@docker-compose ps
-	@echo ""
-	@if [ -f data/notam.db ]; then \
-		echo "Database: $(GREEN)Found$(NC)"; \
-		ls -lh data/notam.db; \
-	else \
-		echo "Database: $(YELLOW)Not initialized$(NC)"; \
-	fi
+search: check-env ## Run free-text NOTAM search (once)
+	docker-compose run --rm notam-app python -m src.main --mode search --once
+
+search-background: check-env ## Run free-text search in background (continuous)
+	docker-compose up -d notam-app
+	docker-compose exec -d notam-app python -m src.main --mode search
+
+##@ Aerodrome Data
+
+load-aerodromes: check-env ## Download and load OurAirports CSV into database
+	@echo "$(BLUE)Downloading and loading OurAirports CSV...$(NC)"
+	@docker-compose run --rm notam-app python -m src.aerodrome_loader --download
+	@echo "$(GREEN) Aerodrome data loaded$(NC)"
+
+##@ Database Maintenance
+
+purge: check-env ## Run database purge routines (expired, cancelled, old search runs)
+	@echo "$(BLUE)Running database purge routines...$(NC)"
+	@docker-compose run --rm notam-app python -m src.database_cli --purge-all
+	@echo "$(GREEN) Purge complete$(NC)"
+
+db-shell: ## Open SQLite shell to local database
+	docker-compose run --rm notam-app sqlite3 /app/data/notam.db
+
+##@ Reports (updated)
+
+report-search: check-env ## Show NOTAMs by search term
+	docker-compose run --rm notam-query python -m src.reports search-term
+
+report-priority: check-env ## Show high priority NOTAMs ordered by score
+	docker-compose run --rm notam-query python -m src.reports priority
+
+report-stats: check-env ## Show summary statistics
+	docker-compose run --rm notam-query python -m src.reports stats
+
+report-closures: check-env ## Show active closures
+	docker-compose run --rm notam-query python -m src.reports closures
+
+report-drone: check-env ## Show drone-related NOTAMs
+	docker-compose run --rm notam-query python -m src.reports drone
 
 ##@ Cleanup
 
-clean: ## Remove all docker-compose containers and images
+clean: ## Remove Docker images and containers
 	@echo "$(BLUE)Cleaning up Docker resources...$(NC)"
-	@docker-compose down -v --remove-orphans
-	@docker image prune -f
-	@echo "$(GREEN) Cleanup complete$(NC)"
+	@docker-compose down --rmi local 2>/dev/null || true
+	@echo "$(GREEN) Docker resources cleaned$(NC)"
 
 clean-cache: ## Remove Python cache files
-	@echo "$(BLUE)Removing Python cache files...$(NC)"
+	@echo "$(BLUE)Removing cache files...$(NC)"
 	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	@find . -type f -name "*.pyo" -delete 2>/dev/null || true

@@ -6,4 +6,3 @@ This project uses Semantic Versioning (Major.Minor.Patch). Major versions indica
 
 - When building locally, modify the value of the VERSION variable in the .env file.
 - When running the Github workflow, make sure that the value of .env.version is updated.
-- Tests cover cases when VERSIONis default 

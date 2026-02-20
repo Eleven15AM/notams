@@ -1,6 +1,7 @@
 # Airports information
 
 Airports were selected based on two criteria: recent drone incursions and strategic value (civilian or military).
+The application now supports free-text search mode (`SEARCH_TERMS` in `.env`), which can discover NOTAMs for any airport without needing to list them here. The airport list below is still used for traditional airport monitoring mode.
 
 ## List of interesting airport ICAO labels
 
