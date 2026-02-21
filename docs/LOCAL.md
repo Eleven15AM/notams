@@ -14,11 +14,11 @@ make build
 
 # 4. Choose your monitoring mode:
 
-# Airport mode (traditional)
-make run-once
+# Airport mode
+make run-once-airport
 
 # OR Search mode
-make search
+make run-once-search
 
 # 5. View results
 make reports
@@ -74,9 +74,12 @@ DRONE_KEYWORDS=drone,UAS,unmanned,RPAs,RPAS,UAV,-copter,balloon
 
 # === Digest Alerts (batched notifications) ===
 NTFY_URL=https://ntfy.sh/your-topic
-NTFY_DIGEST_INTERVAL=3600  # Send digest every hour
-NTFY_MIN_SCORE=80          # Only include NOTAMs with score >= 80
-NTFY_MAX_DIGEST_ITEMS=10   # Max items to show in digest
+# How often to send a digest (seconds)
+NTFY_DIGEST_INTERVAL=3600
+# Minimum priority score to include in digest
+NTFY_MIN_SCORE=80
+# Maximum items to show per digest
+NTFY_MAX_DIGEST_ITEMS=10
 
 # === Priority Score Thresholds ===
 CLOSURE_SCORE=50
@@ -103,23 +106,31 @@ make build
 
 **Airport Mode:**
 ```bash
-# Single update
-make run-once
+# Run once and exit
+make run-once-airport
 
-# Continuous monitoring (daemon)
-make run-background
-make logs-follow  # View logs
-make stop         # Stop when done
+# Continuous monitoring (background)
+make run-background-airport
+make logs-airport   # View logs
+make stop           # Stop when done
 ```
 
 **Search Mode:**
 ```bash
-# Single search
-make search
+# Run once and exit
+make run-once-search
 
-# Continuous search (with digest alerts)
-make search-background
-make logs-follow
+# Continuous monitoring (background, with digest alerts)
+make run-background-search
+make logs-search    # View logs
+make stop           # Stop when done
+```
+
+**Both modes:**
+``` bash
+make run-background-all
+make logs-follow    # View all container logs
+make stop
 ```
 
 ### Aerodrome Data (Optional but Recommended)
@@ -214,9 +225,9 @@ make query FILE=queries/my_query.sql
 
 When running in continuous search mode (make search-background), the system accumulates high-priority NOTAMs and sends periodic digests.
 **How It Works**
-1. NOTAMs with score >= NTFY_MIN_SCORE are added to a queue
-2. Every NTFY_DIGEST_INTERVAL seconds, a digest is sent
-3. The digest includes statistics and the top N items
+1. NOTAMs with score >= ```NTFY_MIN_SCORE``` are added to a queue
+2. Every ```NTFY_DIGEST_INTERVAL``` seconds, a digest is sent
+3. The digest includes statistics and the top ```NTFY_MAX_DIGEST_ITEMS``` items
 4. On shutdown, a final digest is sent immediately
 
 **Example digest**

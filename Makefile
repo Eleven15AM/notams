@@ -2,21 +2,22 @@
 # Commands for local development and testing
 
 .PHONY: help build build-base build-test build-app clean test test-unit test-integration \
-        test-coverage run run-once run-background stop logs logs-follow restart \
-        report-active report-drone report-stats report-by-airport report-today \
-        query query-drone query-recent check-env rebuild clean-cache
-
-.PHONY: help init build run-once run-background logs stop test test-unit test-coverage reports \
-        search search-background load-aerodromes purge db-shell report-search report-priority
+        test-coverage run-once-airport run-once-search run-background-airport \
+        run-background-search run-background-all run-once run-background search \
+        search-background stop logs-airport logs-search logs-follow restart-airport \
+        restart-search report-active report-drone report-stats report-by-airport \
+        report-today report-search report-priority report-closures \
+        query query-drone query-recent check-env rebuild clean-cache \
+        load-aerodromes purge db-shell status info setup init reports
 
 .DEFAULT_GOAL := help
 
 # Color output
-BLUE := \033[0;34m
+BLUE  := \033[0;34m
 GREEN := \033[0;32m
-YELLOW := \033[0;33m
-RED := \033[0;31m
-NC := \033[0m # No Color
+YELLOW:= \033[0;33m
+RED   := \033[0;31m
+NC    := \033[0m
 
 # Load environment variables from .env if it exists
 ifneq (,$(wildcard .env))
@@ -30,33 +31,24 @@ help: ## Display this help message
 	@echo "$(BLUE)NOTAM Monitoring System - Available Commands$(NC)"
 	@echo ""
 	@echo "$(YELLOW)Quick Start (Local Development):$(NC)"
-	@echo "  make init              # Initialize project"
-	@echo "  make build             # Build Docker images locally"
-	@echo "  make run-once          # Run single update"
-	@echo "  make reports           # View reports"
+	@echo "  make init                    # Initialize project"
+	@echo "  make build                   # Build Docker images"
+	@echo "  make run-once-airport        # Run airport mode once"
+	@echo "  make run-once-search         # Run search mode once"
+	@echo "  make reports                 # View all reports"
+	@echo ""
+	@echo "$(YELLOW)Continuous Background Modes:$(NC)"
+	@echo "  make run-background-airport  # Airport mode (continuous)"
+	@echo "  make run-background-search   # Search mode (continuous)"
+	@echo "  make run-background-all      # Both modes simultaneously"
+	@echo "  make stop                    # Stop all containers"
 	@echo ""
 	@echo "$(YELLOW)Production (Pre-built Images):$(NC)"
-	@echo "  make -f Makefile.prod help-prod              # Show production commands"
-	@echo "  make -f Makefile.prod run-background-prod   # Start service"
-	@echo "  make -f Makefile.prod reports-prod          # Generate reports"
-	@echo "  make -f Makefile.prod logs-prod             # View logs"
+	@echo "  make -f Makefile.prod help-prod"
 	@echo ""
-	@echo "$(YELLOW)Search Modes (New):$(NC)"
-	@echo "  make search              # Run free-text search once"
-	@echo "  make search-background   # Run continuous free-text search"
-	@echo "  make report-search       # Show NOTAMs by search term"
-	@echo "  make report-priority     # Show high priority NOTAMs"
+	@awk 'BEGIN {FS = ":.*##"; printf "\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(GREEN)%-28s$(NC) %s\n", $$1, $$2 } /^##@/ { printf "\n$(YELLOW)%s$(NC)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 	@echo ""
-	@echo "$(YELLOW)Aerodrome Data:$(NC)"
-	@echo "  make load-aerodromes     # Download and load OurAirports CSV"
-	@echo ""
-	@echo "$(YELLOW)Database Maintenance:$(NC)"
-	@echo "  make purge               # Run database purge routines"
-	@echo "  make db-shell            # Open SQLite shell"
-	@echo ""
-	@awk 'BEGIN {FS = ":.*##"; printf "\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2 } /^##@/ { printf "\n$(YELLOW)%s$(NC)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
-	@echo ""
-	@echo "$(YELLOW)For production deployment help:$(NC) make -f Makefile.prod help-prod"
+	@echo "$(YELLOW)For production deployment:$(NC) make -f Makefile.prod help-prod"
 	@echo ""
 
 ##@ Setup
@@ -75,7 +67,7 @@ init: ## Initialize project (create dirs, copy env example)
 	@echo "$(GREEN) Project initialized$(NC)"
 
 setup: init build ## Complete setup (init + build all images)
-	@echo "$(GREEN) Setup complete! Try 'make run-once' to start$(NC)"
+	@echo "$(GREEN) Setup complete!$(NC)"
 
 check-env: ## Verify .env file exists and is configured
 	@if [ ! -f .env ]; then \
@@ -94,49 +86,82 @@ build: ## Build all Docker images (base, test, app)
 	@docker-compose build
 	@echo "$(GREEN) All images built successfully$(NC)"
 
-build-base: ## Build only base image with dependencies
-	@echo "$(BLUE)Building base image...$(NC)"
+build-base: ## Build only base image
 	@docker build --target base -t notam-base .
 	@echo "$(GREEN) Base image built$(NC)"
 
 build-test: ## Build test image
-	@echo "$(BLUE)Building test image...$(NC)"
 	@docker build --target test -t notam-test .
 	@echo "$(GREEN) Test image built$(NC)"
 
 build-app: ## Build application image
-	@echo "$(BLUE)Building application image...$(NC)"
 	@docker build --target app -t notam-app .
 	@echo "$(GREEN) Application image built$(NC)"
 
 rebuild: clean build ## Clean and rebuild all images
-	@echo "$(GREEN) Rebuild complete$(NC)"
 
-##@ Run Application (Local Development)
+##@ Run — Airport Mode
+# Uses the notam-app docker-compose service.
+# Requires AIRPORTS to be configured in .env.
 
-run: check-env ## Run continuous monitoring (foreground)
-	@echo "$(BLUE)Starting NOTAM monitoring (continuous mode)...$(NC)"
-	@echo "$(YELLOW)Press Ctrl+C to stop$(NC)"
-	@docker-compose up notam-app
+run-once-airport: check-env ## Run airport monitoring once and exit
+	@echo "$(BLUE)Running airport mode (once)...$(NC)"
+	@docker-compose run --rm notam-app python -m src.main --mode airport --once
+	@echo "$(GREEN) Done$(NC)"
 
-run-once: check-env ## Run single update cycle
-	@echo "$(BLUE)Running single NOTAM update...$(NC)"
-	@docker-compose run --rm notam-app python -m src.main --once
-	@echo "$(GREEN) Update complete$(NC)"
-
-run-background: check-env ## Run in background (daemon mode)
-	@echo "$(BLUE)Starting NOTAM monitoring in background...$(NC)"
+run-background-airport: check-env ## Start airport mode continuous monitoring (background)
+	@echo "$(BLUE)Starting airport monitoring in background...$(NC)"
 	@docker-compose up -d notam-app
-	@echo "$(GREEN) Running in background$(NC)"
-	@echo "$(YELLOW)View logs: make logs-follow$(NC)"
-	@echo "$(YELLOW)Stop: make stop$(NC)"
+	@echo "$(GREEN) Running (airport mode)$(NC)"
+	@echo "$(YELLOW)Logs: make logs-airport   Stop: make stop$(NC)"
+
+logs-airport: ## Follow airport mode container logs
+	@docker-compose logs -f --timestamps notam-app
+
+##@ Run — Search Mode
+# Uses the notam-app-search docker-compose service.
+# Requires SEARCH_TERMS to be configured in .env.
+
+run-once-search: check-env ## Run free-text search mode once and exit
+	@echo "$(BLUE)Running search mode (once)...$(NC)"
+	@docker-compose run --rm notam-app-search python -m src.main --mode search --once
+	@echo "$(GREEN) Done$(NC)"
+
+run-background-search: check-env ## Start search mode continuous monitoring (background)
+	@echo "$(BLUE)Starting search monitoring in background...$(NC)"
+	@docker-compose up -d notam-app-search
+	@echo "$(GREEN) Running (search mode)$(NC)"
+	@echo "$(YELLOW)Logs: make logs-search   Stop: make stop$(NC)"
+
+logs-search: ## Follow search mode container logs
+	@docker-compose logs -f --timestamps notam-app-search
+
+##@ Run — Both Modes
+
+run-background-all: check-env ## Start both airport and search modes simultaneously (background)
+	@echo "$(BLUE)Starting both monitoring modes in background...$(NC)"
+	@docker-compose up -d notam-app notam-app-search
+	@echo "$(GREEN) Both modes running$(NC)"
+	@echo "$(YELLOW)Logs: make logs-follow   Stop: make stop$(NC)"
+
+##@ Stop / Restart
 
 stop: ## Stop all docker-compose containers
 	@echo "$(BLUE)Stopping all containers...$(NC)"
 	@docker-compose down
 	@echo "$(GREEN) All containers stopped$(NC)"
 
-restart: stop run-background ## Restart background service
+logs-follow: ## Follow all container logs
+	@docker-compose logs -f --timestamps
+
+restart-airport: stop run-background-airport ## Restart airport monitoring
+restart-search: stop run-background-search ## Restart search monitoring
+
+# Legacy aliases — kept so existing scripts / habits don't break
+run-once: run-once-airport ## Alias: run-once-airport
+run-background: run-background-airport ## Alias: run-background-airport
+search: run-once-search ## Alias: run-once-search
+search-background: run-background-search ## Alias: run-background-search
 
 ##@ Testing
 
@@ -144,48 +169,60 @@ test: ## Run all tests
 	@echo "$(BLUE)Running all tests...$(NC)"
 	@docker-compose run --rm notam-test pytest -v tests/
 
-test-unit: ## Run only unit tests
+test-unit: ## Run unit tests only
 	@echo "$(BLUE)Running unit tests...$(NC)"
-	@docker-compose run --rm notam-test pytest tests/test_parser.py tests/test_database.py -v
+	@docker-compose run --rm notam-test pytest tests/test_notam_model.py tests/test_parser.py tests/test_database.py -v
 
-test-integration: ## Run only integration tests
+test-integration: ## Run integration tests only
 	@echo "$(BLUE)Running integration tests...$(NC)"
 	@docker-compose run --rm notam-test pytest tests/test_integration.py -v
 
 test-coverage: ## Run tests with coverage report
 	@echo "$(BLUE)Running tests with coverage...$(NC)"
 	@docker-compose run --rm notam-test pytest --cov=src --cov-report=term-missing --cov-report=html
-	@echo "$(GREEN) Coverage report generated in htmlcov/$(NC)"
+	@echo "$(GREEN) Coverage report in htmlcov/$(NC)"
 
-##@ Reports (Local Development)
+##@ Reports
 
-report-active: ## Show all active airport closures
-	@echo "$(BLUE)Active Airport Closures:$(NC)"
+reports: report-stats report-drone report-closures report-priority ## Run all reports
+
+report-stats: check-env ## Show summary statistics
+	@echo "$(BLUE)NOTAM Statistics:$(NC)"
+	@docker-compose run --rm notam-query python -m src.reports stats
+
+report-active: check-env ## Show active NOTAMs
+	@echo "$(BLUE)Active NOTAMs:$(NC)"
 	@docker-compose run --rm notam-query python -m src.reports active
 
-report-today: ## Show today's airport closures
-	@echo "$(BLUE)Today's Airport Closures:$(NC)"
-	@docker-compose run --rm notam-query python -m src.reports today
+report-closures: check-env ## Show active closures
+	@echo "$(BLUE)Active Closures:$(NC)"
+	@docker-compose run --rm notam-query python -m src.reports closures
 
-# report-drone: ## Show drone-related closures
-# 	@echo "$(BLUE)Drone-Related Closures:$(NC)"
-# 	@docker-compose run --rm notam-query python -m src.reports drone
+report-drone: check-env ## Show drone-related NOTAMs
+	@echo "$(BLUE)Drone-Related NOTAMs:$(NC)"
+	@docker-compose run --rm notam-query python -m src.reports drone
 
-# report-stats: ## Show summary statistics
-# 	@echo "$(BLUE)NOTAM Statistics:$(NC)"
-# 	@docker-compose run --rm notam-query python -m src.reports stats
+report-priority: check-env ## Show high priority NOTAMs (score >= 50)
+	@echo "$(BLUE)High Priority NOTAMs:$(NC)"
+	@docker-compose run --rm notam-query python -m src.reports priority
 
-report-by-airport: ## Show closures grouped by airport
-	@echo "$(BLUE)Closures by Airport:$(NC)"
+report-search: check-env ## Show NOTAMs by search term
+	@echo "$(BLUE)NOTAMs by Search Term:$(NC)"
+	@docker-compose run --rm notam-query python -m src.reports search-term
+
+report-by-airport: check-env ## Show NOTAMs grouped by airport
+	@echo "$(BLUE)NOTAMs by Airport:$(NC)"
 	@docker-compose run --rm notam-query python -m src.reports by-airport
 
-reports: report-stats report-drone report-today report-active ## Run all reports
+report-today: check-env ## Show today's NOTAMs
+	@echo "$(BLUE)Today's NOTAMs:$(NC)"
+	@docker-compose run --rm notam-query python -m src.reports today
 
-##@ Custom Queries (Local Development)
+##@ Custom Queries
 
-query: ## Run custom SQL query (usage: make query FILE=queries/your_query.sql)
+query: check-env ## Run custom SQL query (usage: make query FILE=queries/your_query.sql)
 	@if [ -z "$(FILE)" ]; then \
-		echo "$(RED) Please specify query file: make query FILE=queries/your_query.sql$(NC)"; \
+		echo "$(RED) Usage: make query FILE=queries/your_query.sql$(NC)"; \
 		exit 1; \
 	fi
 	@if [ ! -f "$(FILE)" ]; then \
@@ -195,28 +232,11 @@ query: ## Run custom SQL query (usage: make query FILE=queries/your_query.sql)
 	@echo "$(BLUE)Running query: $(FILE)$(NC)"
 	@docker-compose run --rm notam-query python -m src.reports query $(FILE)
 
-query-drone: ## Run drone closures query
-	@make query FILE=queries/drone_closures.sql
+query-drone: check-env ## Run predefined drone closures query
+	@$(MAKE) query FILE=queries/drone_closures.sql
 
-query-recent: ## Run recent closures query
-	@make query FILE=queries/recent_closures.sql
-
-##@ Logs
-
-logs: ## Show recent logs
-	@docker-compose logs --tail=50 notam-app
-
-logs-follow: ## Follow logs in real-time
-	@docker-compose logs -f notam-app
-
-##@ Free-Text Search
-
-search: check-env ## Run free-text NOTAM search (once)
-	docker-compose run --rm notam-app python -m src.main --mode search --once
-
-search-background: check-env ## Run free-text search in background (continuous)
-	docker-compose up -d notam-app
-	docker-compose exec -d notam-app python -m src.main --mode search
+query-recent: check-env ## Run predefined recent closures query
+	@$(MAKE) query FILE=queries/recent_closures.sql
 
 ##@ Aerodrome Data
 
@@ -233,34 +253,40 @@ purge: check-env ## Run database purge routines (expired, cancelled, old search 
 	@echo "$(GREEN) Purge complete$(NC)"
 
 db-shell: ## Open SQLite shell to local database
-	docker-compose run --rm notam-app sqlite3 /app/data/notam.db
+	@docker-compose run --rm notam-app sqlite3 /app/data/notam.db
 
-##@ Reports (updated)
+##@ Development Utilities
 
-report-search: check-env ## Show NOTAMs by search term
-	docker-compose run --rm notam-query python -m src.reports search-term
+status: ## Show running containers and database status
+	@echo "$(BLUE)Container Status:$(NC)"
+	@docker-compose ps
+	@echo ""
+	@if [ -f data/notam.db ]; then \
+		echo "$(GREEN) Database found:$(NC)"; \
+		ls -lh data/notam.db; \
+	else \
+		echo "$(YELLOW) Database not found — run a monitoring mode first$(NC)"; \
+	fi
 
-report-priority: check-env ## Show high priority NOTAMs ordered by score
-	docker-compose run --rm notam-query python -m src.reports priority
-
-report-stats: check-env ## Show summary statistics
-	docker-compose run --rm notam-query python -m src.reports stats
-
-report-closures: check-env ## Show active closures
-	docker-compose run --rm notam-query python -m src.reports closures
-
-report-drone: check-env ## Show drone-related NOTAMs
-	docker-compose run --rm notam-query python -m src.reports drone
+info: ## Show project and Docker image information
+	@echo "$(BLUE)NOTAM Monitoring System$(NC)"
+	@echo ""
+	@echo "Docker Images:"
+	@docker images | grep notam || echo "  No images built yet"
+	@echo ""
+	@echo "Containers:"
+	@docker-compose ps
 
 ##@ Cleanup
 
-clean: ## Remove Docker images and containers
+clean: ## Remove Docker containers and images
 	@echo "$(BLUE)Cleaning up Docker resources...$(NC)"
-	@docker-compose down --rmi local 2>/dev/null || true
-	@echo "$(GREEN) Docker resources cleaned$(NC)"
+	@docker-compose down -v --remove-orphans
+	@docker image prune -f
+	@echo "$(GREEN) Cleanup complete$(NC)"
 
 clean-cache: ## Remove Python cache files
-	@echo "$(BLUE)Removing cache files...$(NC)"
+	@echo "$(BLUE)Removing Python cache files...$(NC)"
 	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	@find . -type f -name "*.pyo" -delete 2>/dev/null || true

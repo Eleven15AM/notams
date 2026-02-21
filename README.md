@@ -115,34 +115,57 @@ DATABASE_PATH=/app/data/notam.db
 
 ```
 
-### 3. Run the Application
+***Important***: Do not put inline comments ( # ...) on the same line as numeric values in .env. Docker's --env-file parser does not strip them, and the value will fail to parse. Put comments on their own line above the value instead!
 
-Airport Mode:
+### 3. Build and Run the Application
+
+**Build the Docker images:**
+
+``` bash
+make build
+```
+
+**Running the Application:**
+
+The application has two independent monitoring modes. Each runs as its own container and writes to the same shared database. You can run one or both simultaneously. 
+
+Airport Mode — monitors a specific list of airports defined in ``` AIRPORTS=: ```
 
 ``` {bash}
 
-# Run once
-make run-once
+# Run once and exit
+make run-once-airport
 
-# Continuous monitoring
-make run-background
-make logs-follow
+# Continuous monitoring (background)
+make run-background-airport
+make logs-airport   # View logs
+make stop           # Stop when done
 
 ```
 
-Search Mode:
+Search Mode — free-text search across all NOTAMs for terms defined in ``` SEARCH_TERMS=: ```
 
 ``` {bash}
+# Run once and exit
+make run-once-search
 
-# Run once
-make search
+# Continuous monitoring (background, with digest alerts)
+make run-background-search
+make logs-search    # View logs
+make stop           # Stop when done
 
-# Continuous search
-make search-background
+```
 
+Both modes simultaneously:
+
+``` bash
+make run-background-all
+make logs-follow    # View all container logs
+make stop
 ```
 
 ### 4. Load Aerodrome Data (Optional but Recommended)
+The system can cache airport data from the OurAirports open dataset. This enables better airport name resolution and country/location data for reports.
 
 ``` {bash}
 
@@ -155,16 +178,17 @@ make load-aerodromes
 
 ``` {bash}
 
-# All reports
+# All reports at once
 make reports
 
-# Specific reports
+# Individual reports
 make report-stats        # Database statistics
 make report-active       # Active NOTAMs
 make report-closures     # Active closures
 make report-drone        # Drone-related NOTAMs
 make report-priority     # High priority NOTAMs (score >= 50)
 make report-search       # NOTAMs by search term
+make report-by-airport   # Grouped by airport
 
 ```
 
@@ -192,7 +216,12 @@ Score thresholds:
 
 ## Alerts with ntfy
 
-When NTFY_URL is configured, the system batches alerts into periodic digests.
+When NTFY_URL is configured, the system batches alerts into periodic digests rather than sending one notification per NOTAM.
+How it works:
+- NOTAMs with priority_score >= NTFY_MIN_SCORE are added to a queue
+- Every ``` NTFY_DIGEST_INTERVAL ``` seconds, a digest is sent
+- The digest includes statistics and the top ``` NTFY_MAX_DIGEST_ITEMS ``` items
+- On shutdown, a final digest is sent immediately
 
 ``` {bash}
 
@@ -236,18 +265,30 @@ make -f Makefile.prod db-backup-prod
 
 ## Production Deployment
 
+Production uses pre-built images pulled from a registry. Each monitoring mode runs as its own independently managed container — ``` notam-airport-prod``` and ```notam-search-prod``` — both sharing the same database volume.
+
 ``` bash
-# Pull latest image and start service
-make -f Makefile.prod run-background-prod
+# Start airport monitoring
+make -f Makefile.prod start-airport-prod
+
+# Start search monitoring
+make -f Makefile.prod start-search-prod
+
+# Start both
+make -f Makefile.prod start-all-prod
+
+# Check what's running
+make -f Makefile.prod status-prod
 
 # View logs
-make -f Makefile.prod logs-prod
+make -f Makefile.prod logs-airport-prod
+make -f Makefile.prod logs-search-prod
 
-# Generate reports
+# Generate reports (no running container required)
 make -f Makefile.prod reports-prod
 
-# Stop service
-make -f Makefile.prod stop-prod
+# Stop everything
+make -f Makefile.prod stop-all-prod
 
 ```
 
